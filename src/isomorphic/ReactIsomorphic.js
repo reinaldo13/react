@@ -55,7 +55,6 @@ var React = {
 
   PropTypes: ReactPropTypes,
   createClass: ReactClass.createClass,
-  createSmurf: ReactClass.createSmurf,
   createFactory: createFactory,
   createMixin: function(mixin) {
     // Currently a noop. Will be used to validate and trace mixins.

@@ -12,7 +12,6 @@
 'use strict';
 
 var ReactComponent = require('ReactComponent');
-var ReactSmurfComponent = require('ReactSmurfComponent');
 var ReactElement = require('ReactElement');
 var ReactPropTypeLocations = require('ReactPropTypeLocations');
 var ReactPropTypeLocationNames = require('ReactPropTypeLocationNames');
@@ -316,15 +315,6 @@ var ReactClassInterface = {
 
 };
 
-var ReactSmurfInterface = {
-
-  propTypes: SpecPolicy.DEFINE_MANY,
-  getDefaultProps: SpecPolicy.DEFINE_MANY_MERGED,
-  render: SpecPolicy.DEFINE_ONCE,
-  updateComponent: SpecPolicy.OVERRIDE_BASE,
-
-};
-
 /**
  * Mapping from class specification keys to special processing functions.
  *
@@ -457,7 +447,7 @@ function validateMethodOverride(proto, name) {
  * Mixin helper which handles policy validation and reserved
  * specification keys when building React classses.
  */
-function mixSpecIntoComponent(Constructor, spec, isSmurf) {
+function mixSpecIntoComponent(Constructor, spec) {
   if (!spec) {
     return;
   }
@@ -503,63 +493,55 @@ function mixSpecIntoComponent(Constructor, spec, isSmurf) {
       // The following member methods should not be automatically bound:
       // 1. Expected ReactClass methods (in the "interface").
       // 2. Overridden methods (that were mixed in).
-      var isReactClassMethod = ReactClassInterface.hasOwnProperty(name);
-      var isSmurfClassMethod = ReactSmurfInterface.hasOwnProperty(name);
+      var isReactClassMethod =
+        ReactClassInterface.hasOwnProperty(name);
       var isAlreadyDefined = proto.hasOwnProperty(name);
       var isFunction = typeof property === 'function';
       var shouldAutoBind =
         isFunction &&
         !isReactClassMethod &&
-        !isSmurfClassMethod &&
         !isAlreadyDefined &&
         spec.autobind !== false;
 
-      if (!(isSmurf && !isSmurfClassMethod && isReactClassMethod)) {
-        if (shouldAutoBind) {
-          if (!proto.__reactAutoBindMap) {
-            proto.__reactAutoBindMap = {};
+      if (shouldAutoBind) {
+        if (!proto.__reactAutoBindMap) {
+          proto.__reactAutoBindMap = {};
+        }
+        proto.__reactAutoBindMap[name] = property;
+        proto[name] = property;
+      } else {
+        if (isAlreadyDefined) {
+          var specPolicy = ReactClassInterface[name];
+
+          // These cases should already be caught by validateMethodOverride.
+          invariant(
+            isReactClassMethod && (
+              specPolicy === SpecPolicy.DEFINE_MANY_MERGED ||
+              specPolicy === SpecPolicy.DEFINE_MANY
+            ),
+            'ReactClass: Unexpected spec policy %s for key %s ' +
+            'when mixing in component specs.',
+            specPolicy,
+            name
+          );
+
+          // For methods which are defined more than once, call the existing
+          // methods before calling the new property, merging if appropriate.
+          if (specPolicy === SpecPolicy.DEFINE_MANY_MERGED) {
+            proto[name] = createMergedResultFunction(proto[name], property);
+          } else if (specPolicy === SpecPolicy.DEFINE_MANY) {
+            proto[name] = createChainedFunction(proto[name], property);
           }
-          proto.__reactAutoBindMap[name] = property;
-          proto[name] = property;
         } else {
-          if (isAlreadyDefined) {
-            var specPolicy = ReactClassInterface[name];
-
-            // These cases should already be caught by validateMethodOverride.
-            invariant(
-              isReactClassMethod && (
-                specPolicy === SpecPolicy.DEFINE_MANY_MERGED ||
-                specPolicy === SpecPolicy.DEFINE_MANY
-              ),
-              'ReactClass: Unexpected spec policy %s for key %s ' +
-              'when mixing in component specs.',
-              specPolicy,
-              name
-            );
-
-            // For methods which are defined more than once, call the existing
-            // methods before calling the new property, merging if appropriate.
-            if (specPolicy === SpecPolicy.DEFINE_MANY_MERGED) {
-              proto[name] = createMergedResultFunction(proto[name], property);
-            } else if (specPolicy === SpecPolicy.DEFINE_MANY) {
-              proto[name] = createChainedFunction(proto[name], property);
-            }
-          } else {
-            proto[name] = property;
-            if (__DEV__) {
-              // Add verbose displayName to the function, which helps when looking
-              // at profiling tools.
-              if (typeof property === 'function' && spec.displayName) {
-                proto[name].displayName = spec.displayName + '_' + name;
-              }
+          proto[name] = property;
+          if (__DEV__) {
+            // Add verbose displayName to the function, which helps when looking
+            // at profiling tools.
+            if (typeof property === 'function' && spec.displayName) {
+              proto[name].displayName = spec.displayName + '_' + name;
             }
           }
         }
-      } else {
-        warning(
-          false,
-          'Smurf components do not support: %s', name
-        );
       }
     }
   }
@@ -804,12 +786,6 @@ assign(
   ReactClassMixin
 );
 
-var ReactSmurfClassComponent = function() {};
-assign(
-  ReactSmurfClassComponent.prototype,
-  ReactSmurfComponent.prototype
-);
-
 /**
  * Module for creating composite components.
  *
@@ -921,46 +897,6 @@ var ReactClass = {
 
     // Reduce time spent doing lookups by setting these on the prototype.
     for (var methodName in ReactClassInterface) {
-      if (!Constructor.prototype[methodName]) {
-        Constructor.prototype[methodName] = null;
-      }
-    }
-
-    return Constructor;
-  },
-
-  createSmurf: function(spec) {
-    var Constructor = function(props, context, updater) {
-
-      // Wire up auto-binding
-      if (this.__reactAutoBindMap) {
-        bindAutoBindMethods(this);
-      }
-
-      this.props = props;
-      this.context = context;
-      this.refs = emptyObject;
-      this.updater = updater || ReactNoopUpdateQueue;
-
-    };
-
-    Constructor.prototype = new ReactSmurfClassComponent();
-    Constructor.prototype.constructor = Constructor;
-
-    mixSpecIntoComponent(Constructor, spec, true);
-
-    // Initialize the defaultProps property after all mixins have been merged.
-    if (Constructor.getDefaultProps) {
-      Constructor.defaultProps = Constructor.getDefaultProps();
-    }
-
-    invariant(
-      Constructor.prototype.render,
-      'createClass(...): Class specification must implement a `render` method.'
-    );
-
-    // Reduce time spent doing lookups by setting these on the prototype.
-    for (var methodName in ReactSmurfInterface) {
       if (!Constructor.prototype[methodName]) {
         Constructor.prototype[methodName] = null;
       }
